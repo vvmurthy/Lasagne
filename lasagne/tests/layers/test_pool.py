@@ -128,6 +128,63 @@ def upscale_2d_dilate(data, scale_factor):
     return upscaled
 
 
+def upscale_2d_subpixel(data, scale_factor):
+    def PS(I, r):
+        upscaled = np.zeros(
+              (I.shape[0], I.shape[1] / (r ** 2),
+               I.shape[2] * r, I.shape[3] * r))
+        for im in range(upscaled.shape[0]):
+            for y in range(upscaled.shape[3]):
+                for x in range(upscaled.shape[2]):
+                    for c in range(upscaled.shape[1]):
+                        c += 1
+                        a = np.floor(x / r).astype(np.int)
+                        b = np.floor(y / r).astype(np.int)
+                        d = c * r * (y % r) + c * (x % r) + (c - 1)
+                        upscaled[im, c-1, x, y] = I[im, d, a, b]
+        return upscaled
+
+    upscaled = np.zeros((data.shape[0],
+                         data.shape[1] / (scale_factor ** 2),
+                         data.shape[2] * scale_factor,
+                         data.shape[3] * scale_factor))
+    chan = 0
+    for Im_sub in np.split(data, data.shape[1] / scale_factor ** 2, axis=1):
+        upscaled[:, chan, :, :] = np.squeeze(PS(Im_sub, scale_factor))
+        chan += 1
+    return upscaled
+
+
+def upscale_2d_nearest(data, scale_factor):
+    def nearest_neighbor_weight_matrix(input_dim, scale_factor):
+        indices = np.arange(0, input_dim * scale_factor)
+        source_indices = np.zeros((indices.shape[0]))
+
+        for x in indices:
+            source_indices[x] = np.min(
+                np.array([np.floor(np.float(x) / scale_factor),
+                          input_dim - 1]))
+
+        weight_matrix = np.zeros((input_dim,
+                                  input_dim * scale_factor)
+                                 ).astype(theano.config.floatX)
+        source_indices = source_indices.astype(np.int)
+        for col in range(0, weight_matrix.shape[1]):
+            weight_matrix[source_indices[col], col] = 1
+
+        return weight_matrix
+
+    weight_matrix = nearest_neighbor_weight_matrix(data.shape[3],
+                                                   scale_factor[0])
+    upscaled = np.dot(data, weight_matrix)
+    upscaled = np.swapaxes(upscaled, 2, 3)
+    weight_matrix = nearest_neighbor_weight_matrix(data.shape[2],
+                                                   scale_factor[1])
+    upscaled = np.dot(upscaled, weight_matrix)
+    upscaled = np.swapaxes(upscaled, 2, 3)
+    return upscaled
+
+
 def upscale_3d_shape(shape, scale_factor):
     return (shape[0], shape[1],
             shape[2] * scale_factor[0], shape[3] * scale_factor[1],
@@ -909,8 +966,14 @@ class TestUpscale2DLayer:
                 yield scale_factor
 
     def mode_test_sets():
-        for mode in ['repeat', 'dilate']:
+        for mode in ['repeat', 'dilate', 'bilinear2D',
+                     'bilinear1D', 'nearest', 'subpixel']:
             yield mode
+
+    def subpixel_special_test_sets():
+        for test_case in [floatX(np.random.randn(8, 36, 28, 24)),
+                          floatX(np.random.randn(8, 36, 24, 24))]:
+            yield test_case
 
     def input_layer(self, output_shape):
         return Mock(output_shape=output_shape)
@@ -934,6 +997,14 @@ class TestUpscale2DLayer:
             Upscale2DLayer(inlayer, scale_factor=(0, 2))
         with pytest.raises(ValueError):
             Upscale2DLayer(inlayer, scale_factor=(2, 0))
+        with pytest.raises(ValueError):
+            Upscale2DLayer(inlayer, scale_factor=(2, 1), mode='bilinear2D')
+        with pytest.raises(ValueError):
+            Upscale2DLayer(inlayer, scale_factor=(2, 1), mode='bilinear1D')
+        with pytest.raises(ValueError):
+            Upscale2DLayer(inlayer, scale_factor=(2, 1), mode='subpixel')
+        with pytest.raises(ValueError):
+            Upscale2DLayer(inlayer, scale_factor=10, mode='subpixel')
 
     def test_invalid_mode(self):
         from lasagne.layers.pool import Upscale2DLayer
@@ -945,12 +1016,45 @@ class TestUpscale2DLayer:
         with pytest.raises(ValueError):
             Upscale2DLayer(inlayer, scale_factor=1, mode=0)
 
+    def test_invalid_dims(self):
+        from lasagne.layers.pool import Upscale2DLayer
+        with pytest.raises(ValueError):
+            Upscale2DLayer(self.input_layer((128, None, 28, 28)),
+                           2, mode='subpixel')
+        with pytest.raises(ValueError):
+            Upscale2DLayer(self.input_layer((128, 1, None, 28)),
+                           2, mode='nearest')
+        with pytest.raises(ValueError):
+            Upscale2DLayer(self.input_layer((128, 4, None, 28)),
+                           2, mode='subpixel')
+        with pytest.raises(ValueError):
+            Upscale2DLayer(self.input_layer((128, 1, 8, None)),
+                           2, mode='nearest')
+
+    @pytest.mark.parametrize(
+        "input", list(subpixel_special_test_sets()))
+    def test_output_subpixel_special(self, input):
+        scale_factor = 6
+        input_layer = self.input_layer(input.shape)
+        input_theano = theano.shared(input)
+        result = self.layer(
+            input_layer,
+            (scale_factor, scale_factor),
+            'subpixel',
+        ).get_output_for(input_theano)
+
+        result_eval = result.eval()
+        numpy_result = upscale_2d_subpixel(input,
+                                           scale_factor)
+        assert np.allclose(result_eval, numpy_result)
+        np.all(numpy_result.shape == result_eval.shape)
+
     @pytest.mark.parametrize(
         "scale_factor", list(scale_factor_test_sets()))
     @pytest.mark.parametrize(
         "mode", list(mode_test_sets()))
     def test_get_output_for(self, scale_factor, mode):
-        input = floatX(np.random.randn(8, 16, 17, 13))
+        input = floatX(np.random.randn(8, 36, 28, 24))
         input_layer = self.input_layer(input.shape)
         input_theano = theano.shared(input)
         result = self.layer(
@@ -962,21 +1066,38 @@ class TestUpscale2DLayer:
         result_eval = result.eval()
         if mode in {'repeat', None}:
             numpy_result = upscale_2d(input, (scale_factor, scale_factor))
+            assert np.allclose(result_eval, numpy_result)
         elif mode == 'dilate':
-            numpy_result = upscale_2d_dilate(input, (scale_factor,
-                                                     scale_factor))
+            numpy_result = upscale_2d_dilate(input,
+                                             (scale_factor, scale_factor))
+            assert np.allclose(result_eval, numpy_result)
+        elif mode == 'nearest':
+            numpy_result = upscale_2d_nearest(input,
+                                              (scale_factor, scale_factor))
+            assert np.allclose(result_eval, numpy_result)
+        elif mode == 'subpixel':
+            numpy_result = upscale_2d_subpixel(input,
+                                               scale_factor)
+            assert np.allclose(result_eval, numpy_result)
+        elif mode == 'bilinear2D':
+            numpy_result = np.zeros(
+                (input.shape[0],
+                 input.shape[1],
+                 scale_factor * input.shape[2],
+                 scale_factor * input.shape[3]))
+        elif mode == 'bilinear1D':
+            numpy_result = np.zeros(
+                (input.shape[0],
+                 input.shape[1],
+                 scale_factor * input.shape[2],
+                 scale_factor * input.shape[3]))
 
         assert np.all(numpy_result.shape == result_eval.shape)
-        assert np.allclose(result_eval, numpy_result)
 
     @pytest.mark.parametrize(
         "input_shape,output_shape",
         [((32, 64, 24, 24), (32, 64, 48, 48)),
-         ((None, 64, 24, 24), (None, 64, 48, 48)),
-         ((32, None, 24, 24), (32, None, 48, 48)),
-         ((32, 64, None, 24), (32, 64, None, 48)),
-         ((32, 64, 24, None), (32, 64, 48, None)),
-         ((32, 64, None, None), (32, 64, None, None))],
+         ((None, 64, 24, 24), (None, 64, 48, 48))],
     )
     @pytest.mark.parametrize(
         "mode", list(mode_test_sets()))
