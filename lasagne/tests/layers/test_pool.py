@@ -131,25 +131,25 @@ def upscale_2d_dilate(data, scale_factor):
 def upscale_2d_subpixel(data, scale_factor):
     def PS(I, r):
         upscaled = np.zeros(
-              (I.shape[0], I.shape[1] / (r ** 2),
+              (I.shape[0], int(I.shape[1] // (r ** 2)),
                I.shape[2] * r, I.shape[3] * r))
         for im in range(upscaled.shape[0]):
             for y in range(upscaled.shape[3]):
                 for x in range(upscaled.shape[2]):
                     for c in range(upscaled.shape[1]):
                         c += 1
-                        a = np.floor(x / r).astype(np.int)
-                        b = np.floor(y / r).astype(np.int)
+                        a = np.floor(x // r).astype(np.int)
+                        b = np.floor(y // r).astype(np.int)
                         d = c * r * (y % r) + c * (x % r) + (c - 1)
                         upscaled[im, c-1, x, y] = I[im, d, a, b]
         return upscaled
 
     upscaled = np.zeros((data.shape[0],
-                         data.shape[1] / (scale_factor ** 2),
+                         int(data.shape[1] // (scale_factor ** 2)),
                          data.shape[2] * scale_factor,
                          data.shape[3] * scale_factor))
     chan = 0
-    for Im_sub in np.split(data, data.shape[1] / scale_factor ** 2, axis=1):
+    for Im_sub in np.split(data, int(data.shape[1] // scale_factor ** 2), axis=1):
         upscaled[:, chan, :, :] = np.squeeze(PS(Im_sub, scale_factor))
         chan += 1
     return upscaled
