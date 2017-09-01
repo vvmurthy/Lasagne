@@ -149,7 +149,8 @@ def upscale_2d_subpixel(data, scale_factor):
                          data.shape[2] * scale_factor,
                          data.shape[3] * scale_factor))
     chan = 0
-    for Im_sub in np.split(data, int(data.shape[1] // scale_factor ** 2), axis=1):
+    for Im_sub in np.split(
+            data, int(data.shape[1] // scale_factor ** 2), axis=1):
         upscaled[:, chan, :, :] = np.squeeze(PS(Im_sub, scale_factor))
         chan += 1
     return upscaled
