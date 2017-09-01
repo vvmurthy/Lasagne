@@ -788,7 +788,7 @@ class Upscale2DLayer(Layer):
                 upscaled = T.concatenate(upscaled, axis=2)
                 return upscaled.dimshuffle(0, 'x', 1, 2)
 
-            chan = self.input_shape[1] / (r ** 2)
+            chan = int(self.input_shape[1] // (r ** 2))
             splits = []
             for q in range(chan):
                 splits.append(r ** 2)
