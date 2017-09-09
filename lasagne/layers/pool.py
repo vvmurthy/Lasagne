@@ -656,12 +656,8 @@ class Upscale2DLayer(Layer):
 
         Only ``'dilate'``, ``'nearest'`` and ``'repeat'``
         support tuple scale factors. ``'bilinear1D'``, ``'bilinear2D'``
-        and ``'subpixel'`` only support integer scale factors, or
+        only support integer scale factors, or
         tuples of the same number.
-
-        Note that for mode ``'subpixel'``, ``scale_factor = r`` and that
-        the number of filters for a given input must be divisible
-        by ``r ** 2``
 
     mode : {'repeat', 'dilate', 'nearest', 'bilinear1D',
             'bilinear2D, 'subpixel'}
@@ -679,8 +675,6 @@ class Upscale2DLayer(Layer):
         ``'bilinear1D'`` uses bilinear upscale with different 1D
          kernel for each upscaled axis [1].
 
-        ``'subpixel'`` uses subpixel convolutional upscaling [2].
-
         Default mode is ``'repeat'``.
 
     **kwargs
@@ -692,10 +686,6 @@ class Upscale2DLayer(Layer):
     .. [1] Augustus Odena, Vincent Dumoulin, Chris Olah (2016):
            Deconvolution and checkerboard artifacts. Distill.
            http://distill.pub/2016/deconv-checkerboard/
-    .. [2] Shi, Wenzhe et al (2016):
-           Real-Time Single Image and Video Super-Resolution Using an
-           Efficient Sub-pixel Convolutional Neural Network.
-           https://arxiv.org/pdf/1609.05158.pdf
 
     Notes
     -----
@@ -708,17 +698,13 @@ class Upscale2DLayer(Layer):
         super(Upscale2DLayer, self).__init__(incoming, **kwargs)
 
         if mode not in {'repeat', 'dilate', 'nearest',
-                        'bilinear2D', 'bilinear1D', 'subpixel'}:
+                        'bilinear2D', 'bilinear1D'}:
             msg = "Mode must be 'repeat', 'dilate', 'nearest', " \
-                  "'bilinear2D', 'bilinear1D' or 'subpixel', not {0}"
+                  "'bilinear2D', or 'bilinear1D', not {0}"
             raise ValueError(msg.format(mode))
         self.mode = mode
 
-        if mode == 'subpixel' and self.input_shape[1] == None:
-            raise ValueError(
-                'Number of filters must be defined for subpixel upscale')
-
-        if mode in {'nearest', 'subpixel'} and (
+        if mode in {'nearest'} and (
                         self.input_shape[2] is None or
                         self.input_shape[3] is None):
             msg = 'Dimensions of 2 trailing axis must be defined ' \
@@ -738,10 +724,6 @@ class Upscale2DLayer(Layer):
             msg = "Scale factor for {0} upscaling must be a scalar " \
                   "or a tuple of the same number"
             raise ValueError(msg.format(self.mode))
-
-        if mode == 'subpixel' \
-                and self.input_shape[1] % self.scale_factor[0] ** 2 != 0:
-            raise ValueError('Number of filters must be divisible by r ** 2')
 
     def get_output_shape_for(self, input_shape):
         output_shape = list(input_shape)  # copy / convert to mutable list
@@ -771,35 +753,6 @@ class Upscale2DLayer(Layer):
                 weight_matrix[source_indices[col], col] = 1
 
             return weight_matrix
-
-        def _phase_shift(self, input, r):
-            def _ps(self, input, r):
-                bsize, _, a, b = self.input_shape
-                upscaled = T.reshape(input, (bsize, r, r, a, b))
-                upscaled = T.transpose(upscaled, (0, 3, 4, 2, 1))
-                upscaled = T.split(
-                    x=upscaled, splits_size=[1] * a, n_splits=a, axis=1)
-                upscaled = [T.reshape(x,
-                                      (bsize, b, r, r)) for x in upscaled]
-                upscaled = T.concatenate(upscaled, axis=2)
-                upscaled = T.split(
-                    x=upscaled, splits_size=[1] * b, n_splits=b, axis=1)
-                upscaled = [T.reshape(x, (bsize, a * r, r)) for x in upscaled]
-                upscaled = T.concatenate(upscaled, axis=2)
-                return upscaled.dimshuffle(0, 'x', 1, 2)
-
-            chan = int(self.input_shape[1] // (r ** 2))
-            splits = []
-            for q in range(chan):
-                splits.append(r ** 2)
-            if chan > 1:
-                Xc = T.split(
-                    x=input, splits_size=splits, n_splits=chan, axis=1)
-                upscaled = T.concatenate(
-                    [_ps(self, xc, r) for xc in Xc], axis=1)
-            else:
-                upscaled = _ps(self, input, r)
-            return upscaled
 
         upscaled = input
         if self.mode == 'repeat':
@@ -835,8 +788,6 @@ class Upscale2DLayer(Layer):
                 self.input_shape[2], self.scale_factor[1])
             upscaled = T.dot(upscaled, weight_matrix)
             upscaled = upscaled.dimshuffle((0, 1, 3, 2))
-        elif self.mode == 'subpixel':
-            upscaled = _phase_shift(self, input, self.scale_factor[0])
 
         return upscaled
 

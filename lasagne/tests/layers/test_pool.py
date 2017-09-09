@@ -968,7 +968,7 @@ class TestUpscale2DLayer:
 
     def mode_test_sets():
         for mode in ['repeat', 'dilate', 'bilinear2D',
-                     'bilinear1D', 'nearest', 'subpixel']:
+                     'bilinear1D', 'nearest']:
             yield mode
 
     def subpixel_special_test_sets():
@@ -1002,10 +1002,6 @@ class TestUpscale2DLayer:
             Upscale2DLayer(inlayer, scale_factor=(2, 1), mode='bilinear2D')
         with pytest.raises(ValueError):
             Upscale2DLayer(inlayer, scale_factor=(2, 1), mode='bilinear1D')
-        with pytest.raises(ValueError):
-            Upscale2DLayer(inlayer, scale_factor=(2, 1), mode='subpixel')
-        with pytest.raises(ValueError):
-            Upscale2DLayer(inlayer, scale_factor=10, mode='subpixel')
 
     def test_invalid_mode(self):
         from lasagne.layers.pool import Upscale2DLayer
@@ -1020,35 +1016,11 @@ class TestUpscale2DLayer:
     def test_invalid_dims(self):
         from lasagne.layers.pool import Upscale2DLayer
         with pytest.raises(ValueError):
-            Upscale2DLayer(self.input_layer((128, None, 28, 28)),
-                           2, mode='subpixel')
-        with pytest.raises(ValueError):
             Upscale2DLayer(self.input_layer((128, 1, None, 28)),
                            2, mode='nearest')
         with pytest.raises(ValueError):
-            Upscale2DLayer(self.input_layer((128, 4, None, 28)),
-                           2, mode='subpixel')
-        with pytest.raises(ValueError):
             Upscale2DLayer(self.input_layer((128, 1, 8, None)),
                            2, mode='nearest')
-
-    @pytest.mark.parametrize(
-        "input", list(subpixel_special_test_sets()))
-    def test_output_subpixel_special(self, input):
-        scale_factor = 6
-        input_layer = self.input_layer(input.shape)
-        input_theano = theano.shared(input)
-        result = self.layer(
-            input_layer,
-            (scale_factor, scale_factor),
-            'subpixel',
-        ).get_output_for(input_theano)
-
-        result_eval = result.eval()
-        numpy_result = upscale_2d_subpixel(input,
-                                           scale_factor)
-        assert np.allclose(result_eval, numpy_result)
-        np.all(numpy_result.shape == result_eval.shape)
 
     @pytest.mark.parametrize(
         "scale_factor", list(scale_factor_test_sets()))
@@ -1075,10 +1047,6 @@ class TestUpscale2DLayer:
         elif mode == 'nearest':
             numpy_result = upscale_2d_nearest(input,
                                               (scale_factor, scale_factor))
-            assert np.allclose(result_eval, numpy_result)
-        elif mode == 'subpixel':
-            numpy_result = upscale_2d_subpixel(input,
-                                               scale_factor)
             assert np.allclose(result_eval, numpy_result)
         elif mode == 'bilinear2D':
             numpy_result = np.zeros(
